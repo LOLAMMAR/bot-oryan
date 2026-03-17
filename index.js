@@ -4,7 +4,7 @@ const cors = require('cors');
 
 const app = express();
 
-// إعدادات CORS للسماح بالطلبات المتخطية لصفحة التحذير
+// إعدادات CORS للسماح بالطلبات من الموقع
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -13,53 +13,16 @@ app.use(cors({
 
 app.use(express.json());
 
-// تشخيص أولي للتوكن مع معالجة الـ Rate Limit
-async function validateToken(token) {
-    try {
-        const response = await fetch('https://discord.com/api/v10/users/@me', {
-            headers: { Authorization: `Bot ${token}` }
-        });
-        
-        if (response.status === 429) {
-            console.warn('⚠️ Alert: Discord is rate-limiting this IP (Status 429). This is very common on Render.');
-            return "RATE_LIMITED";
-        }
-
-        const text = await response.text();
-        if (response.ok) {
-            try {
-                const data = JSON.parse(text);
-                console.log(`✅ Token is valid! Bot Name: ${data.username}`);
-                return true;
-            } catch (e) {
-                console.error('❌ Failed to parse response as JSON:', text.substring(0, 100));
-                return false;
-            }
-        } else {
-            console.error(`❌ Token Validation Failed (Status ${response.status}):`, text.substring(0, 100));
-            return false;
-        }
-    } catch (err) {
-        console.error('❌ Network error during token validation:', err);
-        return false;
-    }
-}
-
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers
   ]
 });
 
-// استخدام Token من متغيرات البيئة (Environment Variables) حصرياً للأمان
-const TOKEN = process.env.DISCORD_TOKEN;
-
-if (!TOKEN) {
-    console.error('❌ Error: DISCORD_TOKEN is not defined in Environment Variables!');
-    // سنترك السيرفر يعمل لكي لا يظهر خطأ في Render، لكن البوت لن يتصل
-}
+// استخدام Token من متغيرات البيئة أو وضعه هنا مباشرة بما أن الـ VPS خاص
+const TOKEN = process.env.DISCORD_TOKEN || "";
 const CHANNEL_ID = "1483207784962064458";
 const ROLE_ID = "1483115535632695318";
 
@@ -109,14 +72,14 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
 
   const [action, userId] = interaction.customId.split("_");
-  
+
   try {
     const user = await client.users.fetch(userId);
 
     if (action === "accept") {
       const guild = interaction.guild;
       const member = await guild.members.fetch(userId).catch(() => null);
-      
+
       let roleStatus = "";
       if (member) {
         await member.roles.add(ROLE_ID);
@@ -126,10 +89,10 @@ client.on('interactionCreate', async interaction => {
       }
 
       await user.send(`✅ تم قبولك في Oryan RP! توجه إلى روم الانتظار.${member ? "\nتم منحك رتبة المواطن تلقائياً." : ""}`).catch(console.error);
-      
+
       const embed = EmbedBuilder.from(interaction.message.embeds[0]);
       embed.setFooter({ text: `✅ الحالة: Accepted بواسطة ${interaction.user.username}${roleStatus}` });
-      
+
       await interaction.update({ embeds: [embed], components: [] });
     }
 
@@ -142,68 +105,22 @@ client.on('interactionCreate', async interaction => {
   } catch (err) {
     console.error(err);
     if (!interaction.replied) {
-        await interaction.reply({ content: "حدث خطأ أثناء معالجة الطلب.", ephemeral: true });
+      await interaction.reply({ content: "حدث خطأ أثناء معالجة الطلب.", ephemeral: true });
     }
   }
 });
 
 client.on('ready', () => {
-    console.log(`✅ Success: Logged in as ${client.user.tag}!`);
+  console.log(`✅ Success: Logged in as ${client.user.tag}!`);
+  console.log('Bot is now online and stable on VPS.');
 });
 
-client.on('error', (error) => {
-    console.error('❌ Discord Client Error:', error);
+client.login(TOKEN).catch(err => {
+  console.error('❌ Failed to login to Discord:', err);
 });
 
-client.on('warn', (info) => {
-    console.warn('⚠️ Discord Warning:', info);
-});
-
-client.on('shardReady', (id) => {
-    console.log(`💎 Shard ${id} is ready!`);
-});
-
-client.on('shardDisconnect', (event, id) => {
-    console.log(`🔌 Shard ${id} disconnected! Code: ${event.code}`);
-});
-
-client.on('debug', (info) => {
-    // تقليل الضجيج قليلاً مع الحفاظ على المهم
-    if (info.includes('Heartbeat') || info.includes('Latency')) return;
-    console.log('🔍 Discord Debug:', info);
-});
-
-console.log('⏳ Attempting to login to Discord...');
-
-async function startBot() {
-    if (!TOKEN) {
-        console.error('❌ Error: DISCORD_TOKEN is not defined!');
-        return;
-    }
-
-    const validation = await validateToken(TOKEN);
-    
-    if (validation === "RATE_LIMITED") {
-        console.log('⏳ Waiting 15 seconds due to rate limit before login attempt...');
-        await new Promise(resolve => setTimeout(resolve, 15000));
-    } else if (!validation) {
-        console.warn('⚠️ Warning: Token validation was not successful, but attempting login anyway...');
-    }
-
-    console.log('⏳ Attempting to login to Discord...');
-    client.login(TOKEN).catch(err => {
-        console.error('❌ Failed to login to Discord:', err);
-        if (err.message.includes('429')) {
-            console.log('⏳ Rate limited on login. Retrying in 60 seconds...');
-            setTimeout(() => startBot(), 60000);
-        }
-    });
-}
-
-startBot();
-
-// تشغيل السيرفر ودعم المنفذ الديناميكي لـ Render
-const PORT = process.env.PORT || 3001;
+// تشغيل السيرفر على منفذ 3001
+const PORT = 3001;
 app.listen(PORT, () => {
-  console.log(`Bot API is running on port ${PORT}`);
+  console.log(`Bot API is running on http://localhost:${PORT}`);
 });
